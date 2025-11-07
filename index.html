@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"
     />
-    <title>MapLibre – Search & Select Area (Draggable)</title>
+    <title>MapLibre – Search & Select Area (Draggable + Full-Radius Hit)</title>
 
     <link
       href="https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.css"
@@ -31,7 +31,7 @@
         inset: 0;
       }
 
-      /* Rendering layers */
+      /* Layers */
       #ellipseLayer {
         position: absolute;
         inset: 0;
@@ -46,7 +46,7 @@
         inset: 0;
         z-index: 20;
         pointer-events: none;
-      } /* pins above ellipse, pass events through */
+      } /* only teal sign pins now */
       #interaction {
         position: absolute;
         inset: 0;
@@ -70,22 +70,22 @@
         stroke-linejoin: round;
       }
 
-      /* Pins (visual only) */
-      .pin,
+      /* Interactive full-radius hit area (invisible but clickable) */
+      #dragHit {
+        fill: rgba(0, 0, 0, 0.001);
+        stroke: none;
+        pointer-events: auto;
+        cursor: grab;
+      }
+      #dragHit.dragging {
+        cursor: grabbing;
+      }
+
+      /* ONLY sign pins (teal) */
       .sign {
         position: absolute;
         pointer-events: none;
         border-radius: 50%;
-      }
-      .pin {
-        width: 16px;
-        height: 16px;
-        background: #ff4d4f;
-        border: 2px solid #fff;
-        transform: translate(-50%, -100%);
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
-      }
-      .sign {
         width: 12px;
         height: 12px;
         background: #00d0a8;
@@ -94,19 +94,17 @@
         box-shadow: 0 0 0 2px #fff, 0 2px 6px rgba(0, 0, 0, 0.35);
       }
 
-      /* Draggable center handle (interactive) */
+      /* Draggable center handle (size set from JS by px radius) */
       #dragHandle {
         position: absolute;
-        width: 20px;
-        height: 20px;
         border-radius: 50%;
         background: #ffffff;
         border: 2px solid #0078ff;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
         transform: translate(-50%, -50%);
         cursor: grab;
-        pointer-events: auto; /* enable interaction on the handle */
-        touch-action: none; /* prevent scroll while dragging */
+        pointer-events: auto;
+        touch-action: none;
       }
       #dragHandle.dragging {
         cursor: grabbing;
@@ -193,7 +191,7 @@
         text-align: center;
         font-size: 18px;
         font-weight: 500;
-        padding: 24px 48px; /* top & bottom padding */
+        padding: 24px 48px;
         border-top-left-radius: 24px;
         border-top-right-radius: 24px;
         box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.15);
@@ -258,16 +256,17 @@
   <body>
     <div id="map"></div>
 
-    <!-- Pins overlay -->
+    <!-- Only sign pins now -->
     <div id="overlay"></div>
 
-    <!-- Ellipse SVG -->
+    <!-- Ellipse + full-radius hit target -->
     <svg id="ellipseLayer">
       <circle id="radiusCircle" cx="-1000" cy="-1000" r="0"></circle>
       <text id="milesLabel" class="miles-label" x="-1000" y="-1000">0 mi</text>
+      <circle id="dragHit" cx="-1000" cy="-1000" r="0"></circle>
     </svg>
 
-    <!-- Interaction layer for draggable handle -->
+    <!-- Draggable handle layer -->
     <div id="interaction">
       <div id="dragHandle" hidden aria-label="Drag selection center"></div>
     </div>
@@ -355,6 +354,7 @@
       const ellipseLayer = document.getElementById("ellipseLayer");
       const circleEl = document.getElementById("radiusCircle");
       const milesLabelEl = document.getElementById("milesLabel");
+      const dragHit = document.getElementById("dragHit");
       const dragHandle = document.getElementById("dragHandle");
 
       const zoomSlider = document.getElementById("zoomSlider");
@@ -369,14 +369,7 @@
       const exitBtn = document.getElementById("exitBtn");
       const selectAreaBtn = document.getElementById("selectAreaBtn");
 
-      /* ---------- Data ---------- */
-      const cityData = [
-        { lng: -118.2437, lat: 34.0522, label: "Los Angeles" },
-        { lng: -122.2712, lat: 37.8044, label: "Oakland" },
-        { lng: -87.6298, lat: 41.8781, label: "Chicago" },
-        { lng: -87.8834, lat: 42.0334, label: "Des Plaines" },
-        { lng: -111.891, lat: 40.7608, label: "Salt Lake City" },
-      ];
+      /* ---------- Data: ONLY signs ---------- */
       const signsData = [
         // Los Angeles
         { lng: -118.268, lat: 34.0407, label: "Sign LA-1" },
@@ -401,15 +394,9 @@
       ];
 
       /* ---------- Pins ---------- */
-      let cityPins = [],
-        signPins = [];
+      let signPins = [];
       map.on("load", () => {
-        cityData.forEach((c) => {
-          const el = document.createElement("div");
-          el.className = "pin";
-          overlay.appendChild(el);
-          cityPins.push({ ...c, el });
-        });
+        // create pins
         signsData.forEach((s) => {
           const el = document.createElement("div");
           el.className = "sign";
@@ -417,70 +404,76 @@
           signPins.push({ ...s, el });
         });
 
+        // initial overlays + listeners
         map.once("render", () => {
-          updateAllOverlays();
+          updatePins();
           updateSignCountInView();
           map.on("move", () => {
-            updateAllOverlays();
+            updatePins();
             updateEllipse();
             updateCounts();
           });
           map.on("zoom", () => {
-            updateAllOverlays();
+            updatePins();
             updateEllipse();
             syncZoomUI();
             updateCounts();
           });
           map.on("resize", () => {
-            updateAllOverlays();
+            updatePins();
             updateEllipse();
             updateCounts();
           });
         });
       });
 
-      function positionElements(items) {
-        items.forEach((p) => {
+      function updatePins() {
+        signPins.forEach((p) => {
           const pos = map.project([p.lng, p.lat]);
           p.el.style.left = pos.x + "px";
           p.el.style.top = pos.y + "px";
         });
       }
-      function updateAllOverlays() {
-        positionElements(cityPins);
-        positionElements(signPins);
-      }
 
-      /* ---------- Search & State ---------- */
-      let activePoint = null; // {lat, lng}
-      let lastSearchLabel = null;
+      /* ---------- State ---------- */
+      let activePoint = null;
 
       function flyTo(lat, lng) {
-        map.flyTo({ center: [lng, lat], zoom: 11, essential: true });
+        map.flyTo({ center: [lng, lat], zoom: 11, essential: true }); // <-- ensures zoom on search
       }
 
-      function setActive(lat, lng, label) {
+      function setActive(lat, lng) {
         activePoint = { lat, lng };
-        lastSearchLabel = label || lastSearchLabel;
         radiusControls.style.display = "flex";
         updateEllipse();
         updateCounts();
       }
 
+      /* ---------- Search ---------- */
       function handleSearch() {
         const q = searchInput.value.trim().toLowerCase();
         if (!q) return;
-        let match = cityData.find((c) => c.label.toLowerCase().includes(q));
-        if (!match) {
+
+        // City centers
+        const cityCenters = {
+          "los angeles": { lat: 34.0522, lng: -118.2437 },
+          oakland: { lat: 37.8044, lng: -122.2712 },
+          chicago: { lat: 41.8781, lng: -87.6298 },
+          "des plaines": { lat: 42.0334, lng: -87.8834 },
+          "salt lake city": { lat: 40.7608, lng: -111.891 },
+        };
+
+        let center = cityCenters[q];
+        if (!center) {
           const s = signsData.find((x) => x.label.toLowerCase().includes(q));
-          if (s) match = s;
+          if (s) center = { lat: s.lat, lng: s.lng };
         }
-        if (match) {
-          flyTo(match.lat, match.lng);
-          setActive(match.lat, match.lng, match.label);
+        if (center) {
+          flyTo(center.lat, center.lng); // <-- pan + zoom
+          setActive(center.lat, center.lng);
         } else {
           alert(
-            'No match found. Try a city or sign (e.g., "Oakland", "Sign LA-1").'
+            'No match found. Try a city (e.g., "Oakland") or sign (e.g., "Sign LA-1").'
           );
         }
       }
@@ -489,7 +482,7 @@
         if (e.key === "Enter") handleSearch();
       });
 
-      /* Exit clears selection */
+      /* ---------- Exit clears selection ---------- */
       exitBtn.addEventListener("click", () => {
         activePoint = null;
         circleEl.setAttribute("r", 0);
@@ -498,6 +491,8 @@
         dragHandle.hidden = true;
         selectAreaBtn.disabled = true;
         statusText.textContent = "Search locations to see results";
+        // Disable SVG hit-testing when inactive
+        ellipseLayer.style.pointerEvents = "none";
       });
 
       /* ---------- Zoom UI ---------- */
@@ -512,7 +507,7 @@
       });
       map.on("load", syncZoomUI);
 
-      /* ---------- Distances ---------- */
+      /* ---------- Distance helpers ---------- */
       function toRad(d) {
         return (d * Math.PI) / 180;
       }
@@ -542,7 +537,7 @@
         return meters / mPerPx;
       }
 
-      /* ---------- Slider mapping (0..100 => 0..50mi, 0.1 steps up to 3mi) ---------- */
+      /* ---------- Slider mapping (0..100 => 0..50mi) ---------- */
       function sliderToMiles(v) {
         const val = parseInt(v, 10);
         if (val <= 30) return +(val * 0.1).toFixed(1); // 0..3.0
@@ -555,7 +550,18 @@
         return Math.round(30 + t * 70);
       }
 
-      /* ---------- Ellipse + Handle ---------- */
+      /* ---------- Handle size by on-screen pixel radius ---------- */
+      // Map 40px → 16px handle  …  300px → 36px handle
+      function handleSizeForPx(pxRadius) {
+        const minSize = 16,
+          maxSize = 36;
+        const lo = 40,
+          hi = 300;
+        const t = Math.max(0, Math.min(1, (pxRadius - lo) / (hi - lo)));
+        return Math.round(minSize + t * (maxSize - minSize));
+      }
+
+      /* ---------- Ellipse + Handle + Hit ---------- */
       function positionHandle() {
         if (!activePoint) {
           dragHandle.hidden = true;
@@ -569,6 +575,7 @@
 
       function updateEllipse() {
         if (!activePoint) return;
+
         const pos = map.project([activePoint.lng, activePoint.lat]);
         const miles = parseFloat(radiusInput.value) || 0.1;
         const pxRadius = milesToPixels(activePoint, miles);
@@ -581,11 +588,24 @@
         milesLabelEl.setAttribute("x", pos.x);
         milesLabelEl.setAttribute("y", pos.y - pxRadius - 10);
 
+        // Mirror ellipse to hit target (full-radius drag)
+        dragHit.setAttribute("cx", pos.x);
+        dragHit.setAttribute("cy", pos.y);
+        dragHit.setAttribute("r", pxRadius);
+
+        // Enable SVG hit-testing only when a selection is active
+        ellipseLayer.style.pointerEvents = "auto";
+
+        // Scale the center handle by on-screen pixel radius
+        const size = handleSizeForPx(pxRadius);
+        dragHandle.style.width = size + "px";
+        dragHandle.style.height = size + "px";
+
         positionHandle();
         updateSelectButtonState();
       }
 
-      /* Draggable logic (Pointer Events) */
+      /* ---------- Dragging (center handle) ---------- */
       let isDraggingHandle = false;
 
       function screenToLngLat(clientX, clientY) {
@@ -594,6 +614,7 @@
         const y = clientY - rect.top;
         return map.unproject([x, y]);
       }
+
       function onPointerMove(e) {
         if (!isDraggingHandle || !activePoint) return;
         const ll = screenToLngLat(e.clientX, e.clientY);
@@ -621,6 +642,41 @@
         window.addEventListener("pointerup", onPointerUp);
         e.preventDefault();
       });
+
+      /* ---------- Dragging (full-radius hit area) ---------- */
+      let isDraggingHit = false;
+
+      dragHit.addEventListener("pointerdown", (e) => {
+        if (!activePoint) return;
+        isDraggingHit = true;
+        dragHit.classList.add("dragging");
+
+        map.dragPan.disable();
+        map.scrollZoom.disable();
+
+        window.addEventListener("pointermove", onHitPointerMove);
+        window.addEventListener("pointerup", onHitPointerUp);
+        e.preventDefault();
+      });
+
+      function onHitPointerMove(e) {
+        if (!isDraggingHit || !activePoint) return;
+        const ll = screenToLngLat(e.clientX, e.clientY);
+        activePoint.lng = ll.lng;
+        activePoint.lat = ll.lat;
+        updateEllipse();
+        updateCounts();
+      }
+
+      function onHitPointerUp() {
+        if (!isDraggingHit) return;
+        isDraggingHit = false;
+        dragHit.classList.remove("dragging");
+        map.dragPan.enable();
+        map.scrollZoom.enable();
+        window.removeEventListener("pointermove", onHitPointerMove);
+        window.removeEventListener("pointerup", onHitPointerUp);
+      }
 
       /* ---------- Counts + Button enable ---------- */
       function countSignsInSelection() {
@@ -684,7 +740,7 @@
         updateCounts();
       });
 
-      /* ---------- Select area action ---------- */
+      /* ---------- Select area ---------- */
       selectAreaBtn.addEventListener("click", () => {
         if (!activePoint) return;
         const selectedCount = countSignsInSelection();
@@ -693,7 +749,6 @@
             selectedCount !== 1 ? "s" : ""
           } in this area!`
         );
-        // TODO: Navigate to next screen in your product flow
       });
     </script>
   </body>
