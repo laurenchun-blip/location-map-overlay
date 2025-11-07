@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>MapLibre – OSM Raster Map with Custom Locations</title>
+    <title>MapLibre – Editable Radius Input</title>
     <link
       href="https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.css"
       rel="stylesheet"
@@ -26,28 +26,68 @@
         pointer-events: none;
         z-index: 10;
       }
+      svg#ellipseLayer {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        overflow: visible;
+        z-index: 11;
+      }
+      circle {
+        fill: rgba(0, 120, 255, 0.18);
+        stroke: rgba(0, 120, 255, 0.9);
+        stroke-width: 2;
+      }
+      text.miles-label {
+        fill: #0b5bd7;
+        font-size: 12px;
+        font-weight: 600;
+        paint-order: stroke;
+        stroke: white;
+        stroke-width: 3px;
+        stroke-linejoin: round;
+      }
+
       .pin {
         position: absolute;
-        width: 20px;
-        height: 20px;
+        width: 18px;
+        height: 18px;
         background: #ff4d4f;
         border: 2px solid #fff;
         border-radius: 50%;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
-        transform: translate(-50%, -100%) scale(0);
-        transition: transform 0.3s cubic-bezier(0.22, 1.61, 0.36, 1);
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+        transform: translate(-50%, -100%);
         pointer-events: auto;
         cursor: pointer;
+        transition: transform 0.15s ease;
       }
-      .pin.visible {
-        transform: translate(-50%, -100%) scale(1);
+      .pin:hover {
+        transform: translate(-50%, -100%) scale(1.25);
+      }
+      .pin-label {
+        position: absolute;
+        top: -24px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.75);
+        color: #fff;
+        font-size: 11px;
+        padding: 2px 6px;
+        border-radius: 4px;
+        opacity: 0;
+        transition: opacity 0.15s ease;
+      }
+      .pin:hover .pin-label {
+        opacity: 1;
       }
 
-      /* Search bar */
       #searchBar {
         position: absolute;
         top: 12px;
         left: 12px;
+        z-index: 20;
         background: rgba(255, 255, 255, 0.9);
         padding: 6px 10px;
         border-radius: 8px;
@@ -55,14 +95,14 @@
         display: flex;
         gap: 6px;
         align-items: center;
-        z-index: 20;
+        backdrop-filter: blur(4px);
       }
       #searchInput {
         border: none;
         background: transparent;
         outline: none;
         font-size: 14px;
-        width: 180px;
+        width: 200px;
       }
       #searchBtn {
         border: none;
@@ -72,53 +112,99 @@
         padding: 4px 8px;
         cursor: pointer;
       }
-      #searchBtn:hover {
-        background: #005ed1;
-      }
 
-      /* Slider */
-      #sliderPanel {
+      #zoomPanel {
         position: absolute;
         bottom: 16px;
         left: 50%;
         transform: translateX(-50%);
+        z-index: 20;
         background: rgba(20, 20, 20, 0.75);
         color: #fff;
         padding: 8px 14px;
         border-radius: 12px;
-        border: 1px solid rgba(255, 255, 255, 0.15);
         display: flex;
-        align-items: center;
         gap: 8px;
-        z-index: 20;
+        align-items: center;
+        backdrop-filter: blur(6px);
       }
       #zoomSlider {
         width: 180px;
+      }
+
+      #radiusPanel {
+        position: absolute;
+        bottom: 74px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 20;
+        background: rgba(255, 255, 255, 0.92);
+        color: #111;
+        padding: 8px 14px;
+        border-radius: 12px;
+        border: 1px solid rgba(0, 0, 0, 0.2);
+        display: none;
+        gap: 10px;
+        align-items: center;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.15);
+      }
+      #radiusSlider {
+        width: 240px;
+      }
+      #radiusValue {
+        width: 60px;
+        text-align: right;
+        border: 1px solid rgba(0, 0, 0, 0.3);
+        border-radius: 6px;
+        padding: 2px 4px;
+        font-size: 13px;
       }
     </style>
   </head>
   <body>
     <div id="map"></div>
     <div id="overlay"></div>
+    <svg id="ellipseLayer">
+      <circle id="radiusCircle" cx="-1000" cy="-1000" r="0"></circle>
+      <text id="milesLabel" class="miles-label" x="-1000" y="-1000">0 mi</text>
+    </svg>
 
-    <!-- Search bar -->
     <div id="searchBar">
-      <input id="searchInput" type="text" placeholder="Search location..." />
+      <input id="searchInput" type="text" placeholder="Search city..." />
       <button id="searchBtn">Go</button>
     </div>
 
-    <!-- Zoom slider -->
-    <div id="sliderPanel">
+    <div id="zoomPanel">
       <label for="zoomSlider">Zoom:</label>
       <input
-        type="range"
         id="zoomSlider"
+        type="range"
         min="1"
         max="14"
         step="0.1"
         value="4"
       />
-      <span id="zoomValue">4</span>
+      <span id="zoomValue">4.0</span>
+    </div>
+
+    <div id="radiusPanel">
+      <label for="radiusSlider">Radius (mi):</label>
+      <input
+        id="radiusSlider"
+        type="range"
+        min="0"
+        max="100"
+        step="1"
+        value="15"
+      />
+      <input
+        id="radiusValue"
+        type="number"
+        min="0.1"
+        max="50"
+        step="0.1"
+        value="1.5"
+      />
     </div>
 
     <script src="https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.js"></script>
@@ -135,25 +221,24 @@
               attribution: "© OpenStreetMap contributors",
             },
           },
-          layers: [
-            {
-              id: "osm-tiles",
-              type: "raster",
-              source: "osm",
-            },
-          ],
+          layers: [{ id: "osm-tiles", type: "raster", source: "osm" }],
         },
         center: [-98.5, 39.8],
         zoom: 4,
       });
 
       const overlay = document.getElementById("overlay");
-      const slider = document.getElementById("zoomSlider");
+      const ellipseLayer = document.getElementById("ellipseLayer");
+      const circleEl = document.getElementById("radiusCircle");
+      const milesLabelEl = document.getElementById("milesLabel");
+      const zoomSlider = document.getElementById("zoomSlider");
       const zoomValue = document.getElementById("zoomValue");
+      const radiusPanel = document.getElementById("radiusPanel");
+      const radiusSlider = document.getElementById("radiusSlider");
+      const radiusInput = document.getElementById("radiusValue");
       const searchInput = document.getElementById("searchInput");
       const searchBtn = document.getElementById("searchBtn");
 
-      // --- CUSTOM LOCATIONS ---
       const cityData = [
         { lng: -111.891, lat: 40.7608, label: "Salt Lake City" },
         { lng: -112.07, lat: 41.223, label: "Ogden" },
@@ -166,69 +251,165 @@
         { lng: -87.8834, lat: 42.0334, label: "Des Plaines" },
       ];
 
-      // One reusable pin
-      const pin = document.createElement("div");
-      pin.className = "pin";
-      overlay.appendChild(pin);
+      let pinEls = [],
+        activeCity = null;
 
-      // Update pin position
-      function positionPin(lng, lat) {
-        const pos = map.project([lng, lat]);
-        pin.style.left = pos.x + "px";
-        pin.style.top = pos.y + "px";
+      map.on("load", () => {
+        cityData.forEach((c) => {
+          const pin = document.createElement("div");
+          pin.className = "pin";
+          const label = document.createElement("div");
+          label.className = "pin-label";
+          label.innerText = c.label;
+          pin.appendChild(label);
+          overlay.appendChild(pin);
+          pinEls.push({ ...c, el: pin });
+          pin.addEventListener("click", () => {
+            flyToCity(c);
+            setActiveCity(c);
+          });
+        });
+        updatePins();
+        map.on("move", () => {
+          updatePins();
+          updateEllipse();
+        });
+        map.on("zoom", () => {
+          updatePins();
+          updateEllipse();
+          syncZoomUI();
+        });
+        map.on("resize", () => {
+          updatePins();
+          updateEllipse();
+        });
+      });
+
+      function updatePins() {
+        const rect = map.getCanvasContainer().getBoundingClientRect();
+        pinEls.forEach((p) => {
+          const pos = map.project([p.lng, p.lat]);
+          if (
+            pos.x < 0 ||
+            pos.y < 0 ||
+            pos.x > rect.width ||
+            pos.y > rect.height
+          ) {
+            p.el.style.display = "none";
+          } else {
+            p.el.style.display = "block";
+            p.el.style.left = pos.x + "px";
+            p.el.style.top = pos.y + "px";
+          }
+        });
       }
 
-      // Keep pin in sync
-      function updatePinPosition() {
-        if (!pin.classList.contains("visible")) return;
-        const lng = parseFloat(pin.dataset.lng);
-        const lat = parseFloat(pin.dataset.lat);
-        if (!isNaN(lng) && !isNaN(lat)) positionPin(lng, lat);
-      }
-      map.on("move", updatePinPosition);
-      map.on("zoom", updatePinPosition);
-      map.on("resize", updatePinPosition);
-
-      // Fly + drop pin
       function flyToCity(city) {
-        map.flyTo({ center: [city.lng, city.lat], zoom: 10, essential: true });
-        pin.dataset.lng = city.lng;
-        pin.dataset.lat = city.lat;
-        setTimeout(() => {
-          positionPin(city.lng, city.lat);
-          pin.classList.add("visible");
-        }, 700);
+        map.flyTo({ center: [city.lng, city.lat], zoom: 11, essential: true });
       }
 
-      // Search
+      function setActiveCity(city) {
+        activeCity = city;
+        radiusPanel.style.display = "flex";
+        updateEllipse();
+      }
+
+      // nonlinear mapping for slider
+      function sliderToMiles(v) {
+        const val = parseInt(v, 10);
+        if (val <= 30) return +(val * 0.1).toFixed(1);
+        const t = (val - 30) / 70;
+        return +(3 + t * (50 - 3)).toFixed(1);
+      }
+      function milesToSlider(mi) {
+        if (mi <= 3) return Math.round(mi * 10);
+        const t = (mi - 3) / (50 - 3);
+        return Math.round(30 + t * 70);
+      }
+
+      // convert miles to pixels
+      function haversine(a, b) {
+        const R = 6371008.8,
+          toRad = (d) => (d * Math.PI) / 180;
+        const dLat = toRad(b.lat - a.lat),
+          dLng = toRad(b.lng - a.lng);
+        const lat1 = toRad(a.lat),
+          lat2 = toRad(b.lat);
+        const h =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+        return 2 * R * Math.asin(Math.sqrt(h));
+      }
+      function milesToPixels(centerLngLat, miles) {
+        const meters = miles * 1609.344;
+        const canvas = map.getCanvas();
+        const y = canvas.height / 2,
+          x = canvas.width / 2;
+        const ll1 = map.unproject([x, y]),
+          ll2 = map.unproject([x + 1, y]);
+        const mPerPx = haversine(
+          { lat: ll1.lat, lng: ll1.lng },
+          { lat: ll2.lat, lng: ll2.lng }
+        );
+        return meters / mPerPx;
+      }
+
+      function updateEllipse() {
+        if (!activeCity) return;
+        const pos = map.project([activeCity.lng, activeCity.lat]);
+        const miles = parseFloat(radiusInput.value) || 0;
+        const pxRadius = milesToPixels(activeCity, miles);
+        circleEl.setAttribute("cx", pos.x);
+        circleEl.setAttribute("cy", pos.y);
+        circleEl.setAttribute("r", pxRadius);
+        milesLabelEl.textContent = `${miles.toFixed(1)} mi`;
+        milesLabelEl.setAttribute("x", pos.x);
+        milesLabelEl.setAttribute("y", pos.y - pxRadius - 10);
+      }
+
       function handleSearch() {
         const q = searchInput.value.trim().toLowerCase();
         if (!q) return;
         const match = cityData.find((c) => c.label.toLowerCase().includes(q));
         if (match) {
           flyToCity(match);
-        } else {
-          alert(
-            "No match found. Try Los Angeles, Oakland, Chicago, or Des Plaines."
-          );
-        }
+          setActiveCity(match);
+        } else alert("No match found.");
       }
       searchBtn.addEventListener("click", handleSearch);
       searchInput.addEventListener("keydown", (e) => {
         if (e.key === "Enter") handleSearch();
       });
 
-      // Slider
-      slider.addEventListener("input", (e) => {
+      function syncZoomUI() {
+        const z = map.getZoom();
+        zoomSlider.value = z.toFixed(1);
+        zoomValue.textContent = z.toFixed(1);
+      }
+      zoomSlider.addEventListener("input", (e) => {
         const z = parseFloat(e.target.value);
         map.setZoom(z);
         zoomValue.textContent = z.toFixed(1);
       });
-      map.on("zoom", () => {
-        const z = map.getZoom();
-        slider.value = z.toFixed(1);
-        zoomValue.textContent = z.toFixed(1);
+      map.on("zoom", syncZoomUI);
+
+      // Slider → updates input + ellipse
+      radiusSlider.addEventListener("input", () => {
+        const miles = sliderToMiles(radiusSlider.value);
+        radiusInput.value = miles.toFixed(1);
+        updateEllipse();
       });
+      // Input → updates slider + ellipse
+      radiusInput.addEventListener("change", () => {
+        let miles = parseFloat(radiusInput.value);
+        if (isNaN(miles) || miles < 0.1) miles = 0.1;
+        if (miles > 50) miles = 50;
+        radiusInput.value = miles.toFixed(1);
+        radiusSlider.value = milesToSlider(miles);
+        updateEllipse();
+      });
+
+      map.on("load", syncZoomUI);
     </script>
   </body>
 </html>
