@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>MapLibre – Visible Pins + Slider</title>
+    <title>MapLibre – OSM Raster Map with Custom Locations</title>
     <link
       href="https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.css"
       rel="stylesheet"
@@ -20,33 +20,63 @@
         position: absolute;
         inset: 0;
       }
-
-      /* overlay container */
       #overlay {
         position: absolute;
         inset: 0;
         pointer-events: none;
         z-index: 10;
       }
-
       .pin {
         position: absolute;
-        width: 18px;
-        height: 18px;
+        width: 20px;
+        height: 20px;
         background: #ff4d4f;
         border: 2px solid #fff;
         border-radius: 50%;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
-        transform: translate(-50%, -100%);
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+        transform: translate(-50%, -100%) scale(0);
+        transition: transform 0.3s cubic-bezier(0.22, 1.61, 0.36, 1);
         pointer-events: auto;
         cursor: pointer;
-        transition: transform 0.15s ease;
       }
-      .pin:hover {
-        transform: translate(-50%, -100%) scale(1.25);
+      .pin.visible {
+        transform: translate(-50%, -100%) scale(1);
       }
 
-      /* slider panel */
+      /* Search bar */
+      #searchBar {
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        background: rgba(255, 255, 255, 0.9);
+        padding: 6px 10px;
+        border-radius: 8px;
+        border: 1px solid rgba(0, 0, 0, 0.2);
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        z-index: 20;
+      }
+      #searchInput {
+        border: none;
+        background: transparent;
+        outline: none;
+        font-size: 14px;
+        width: 180px;
+      }
+      #searchBtn {
+        border: none;
+        background: #0078ff;
+        color: white;
+        border-radius: 6px;
+        padding: 4px 8px;
+        cursor: pointer;
+      }
+      #searchBtn:hover {
+        background: #005ed1;
+      }
+
+      /* Slider */
       #sliderPanel {
         position: absolute;
         bottom: 16px;
@@ -61,7 +91,6 @@
         align-items: center;
         gap: 8px;
         z-index: 20;
-        backdrop-filter: blur(6px);
       }
       #zoomSlider {
         width: 180px;
@@ -72,6 +101,13 @@
     <div id="map"></div>
     <div id="overlay"></div>
 
+    <!-- Search bar -->
+    <div id="searchBar">
+      <input id="searchInput" type="text" placeholder="Search location..." />
+      <button id="searchBtn">Go</button>
+    </div>
+
+    <!-- Zoom slider -->
     <div id="sliderPanel">
       <label for="zoomSlider">Zoom:</label>
       <input
@@ -80,70 +116,114 @@
         min="1"
         max="14"
         step="0.1"
-        value="6"
+        value="4"
       />
-      <span id="zoomValue">6</span>
+      <span id="zoomValue">4</span>
     </div>
 
     <script src="https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.js"></script>
     <script>
       const map = new maplibregl.Map({
         container: "map",
-        style: "https://demotiles.maplibre.org/style.json",
-        center: [-111.891, 40.7608],
-        zoom: 6,
+        style: {
+          version: 8,
+          sources: {
+            osm: {
+              type: "raster",
+              tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+              tileSize: 256,
+              attribution: "© OpenStreetMap contributors",
+            },
+          },
+          layers: [
+            {
+              id: "osm-tiles",
+              type: "raster",
+              source: "osm",
+            },
+          ],
+        },
+        center: [-98.5, 39.8],
+        zoom: 4,
       });
 
       const overlay = document.getElementById("overlay");
       const slider = document.getElementById("zoomSlider");
       const zoomValue = document.getElementById("zoomValue");
+      const searchInput = document.getElementById("searchInput");
+      const searchBtn = document.getElementById("searchBtn");
 
-      // Example pin data
-      const pinsData = [
+      // --- CUSTOM LOCATIONS ---
+      const cityData = [
         { lng: -111.891, lat: 40.7608, label: "Salt Lake City" },
         { lng: -112.07, lat: 41.223, label: "Ogden" },
         { lng: -111.6585, lat: 40.2338, label: "Provo" },
+        { lng: -74.006, lat: 40.7128, label: "New York" },
+        { lng: -95.3698, lat: 29.7604, label: "Houston" },
+        { lng: -118.2437, lat: 34.0522, label: "Los Angeles" },
+        { lng: -122.2712, lat: 37.8044, label: "Oakland" },
+        { lng: -87.6298, lat: 41.8781, label: "Chicago" },
+        { lng: -87.8834, lat: 42.0334, label: "Des Plaines" },
       ];
-      const pinEls = [];
 
-      map.on("load", () => {
-        // Create pin elements
-        pinsData.forEach((p) => {
-          const d = document.createElement("div");
-          d.className = "pin";
-          d.title = p.label;
-          overlay.appendChild(d);
-          pinEls.push({ ...p, el: d });
-        });
+      // One reusable pin
+      const pin = document.createElement("div");
+      pin.className = "pin";
+      overlay.appendChild(pin);
 
-        // Wait for first render frame so map.project() works
-        map.once("render", () => {
-          updatePins();
-          // Update positions whenever map moves, zooms, or resizes
-          map.on("move", updatePins);
-          map.on("zoom", updatePins);
-          map.on("resize", updatePins);
-        });
-      });
-
-      function updatePins() {
-        pinEls.forEach((pin) => {
-          const pos = map.project([pin.lng, pin.lat]);
-          // always show for debugging (remove next 2 lines once verified)
-          pin.el.style.display = "block";
-          pin.el.style.left = pos.x + "px";
-          pin.el.style.top = pos.y + "px";
-        });
+      // Update pin position
+      function positionPin(lng, lat) {
+        const pos = map.project([lng, lat]);
+        pin.style.left = pos.x + "px";
+        pin.style.top = pos.y + "px";
       }
 
-      // slider → zoom
+      // Keep pin in sync
+      function updatePinPosition() {
+        if (!pin.classList.contains("visible")) return;
+        const lng = parseFloat(pin.dataset.lng);
+        const lat = parseFloat(pin.dataset.lat);
+        if (!isNaN(lng) && !isNaN(lat)) positionPin(lng, lat);
+      }
+      map.on("move", updatePinPosition);
+      map.on("zoom", updatePinPosition);
+      map.on("resize", updatePinPosition);
+
+      // Fly + drop pin
+      function flyToCity(city) {
+        map.flyTo({ center: [city.lng, city.lat], zoom: 10, essential: true });
+        pin.dataset.lng = city.lng;
+        pin.dataset.lat = city.lat;
+        setTimeout(() => {
+          positionPin(city.lng, city.lat);
+          pin.classList.add("visible");
+        }, 700);
+      }
+
+      // Search
+      function handleSearch() {
+        const q = searchInput.value.trim().toLowerCase();
+        if (!q) return;
+        const match = cityData.find((c) => c.label.toLowerCase().includes(q));
+        if (match) {
+          flyToCity(match);
+        } else {
+          alert(
+            "No match found. Try Los Angeles, Oakland, Chicago, or Des Plaines."
+          );
+        }
+      }
+      searchBtn.addEventListener("click", handleSearch);
+      searchInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") handleSearch();
+      });
+
+      // Slider
       slider.addEventListener("input", (e) => {
         const z = parseFloat(e.target.value);
         map.setZoom(z);
         zoomValue.textContent = z.toFixed(1);
       });
-
-      // sync slider with map zoom
       map.on("zoom", () => {
         const z = map.getZoom();
         slider.value = z.toFixed(1);
