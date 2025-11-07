@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>MapLibre – Editable Radius Input</title>
+    <title>MapLibre – Exit Button to Clear Ellipse</title>
     <link
       href="https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.css"
       rel="stylesheet"
@@ -23,18 +23,19 @@
       #overlay {
         position: absolute;
         inset: 0;
+        z-index: 20;
         pointer-events: none;
-        z-index: 10;
       }
-      svg#ellipseLayer {
+      #ellipseLayer {
         position: absolute;
         inset: 0;
         width: 100%;
         height: 100%;
         pointer-events: none;
         overflow: visible;
-        z-index: 11;
+        z-index: 10;
       }
+
       circle {
         fill: rgba(0, 120, 255, 0.18);
         stroke: rgba(0, 120, 255, 0.9);
@@ -45,7 +46,7 @@
         font-size: 12px;
         font-weight: 600;
         paint-order: stroke;
-        stroke: white;
+        stroke: #fff;
         stroke-width: 3px;
         stroke-linejoin: round;
       }
@@ -59,35 +60,25 @@
         border-radius: 50%;
         box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
         transform: translate(-50%, -100%);
-        pointer-events: auto;
-        cursor: pointer;
-        transition: transform 0.15s ease;
+        pointer-events: none;
       }
-      .pin:hover {
-        transform: translate(-50%, -100%) scale(1.25);
-      }
-      .pin-label {
+      .sign {
         position: absolute;
-        top: -24px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.75);
-        color: #fff;
-        font-size: 11px;
-        padding: 2px 6px;
-        border-radius: 4px;
-        opacity: 0;
-        transition: opacity 0.15s ease;
-      }
-      .pin:hover .pin-label {
-        opacity: 1;
+        width: 14px;
+        height: 14px;
+        background: #00d0a8;
+        border: 2px solid #003d34;
+        border-radius: 50%;
+        box-shadow: 0 0 0 2px #fff, 0 2px 6px rgba(0, 0, 0, 0.35);
+        transform: translate(-50%, -50%);
+        pointer-events: none;
       }
 
       #searchBar {
         position: absolute;
         top: 12px;
         left: 12px;
-        z-index: 20;
+        z-index: 30;
         background: rgba(255, 255, 255, 0.9);
         padding: 6px 10px;
         border-radius: 8px;
@@ -102,15 +93,28 @@
         background: transparent;
         outline: none;
         font-size: 14px;
-        width: 200px;
+        width: 180px;
       }
-      #searchBtn {
+      #searchBtn,
+      #exitBtn {
         border: none;
-        background: #0078ff;
-        color: white;
         border-radius: 6px;
         padding: 4px 8px;
         cursor: pointer;
+      }
+      #searchBtn {
+        background: #0078ff;
+        color: white;
+      }
+      #searchBtn:hover {
+        background: #005ed1;
+      }
+      #exitBtn {
+        background: #ccc;
+        color: #222;
+      }
+      #exitBtn:hover {
+        background: #aaa;
       }
 
       #zoomPanel {
@@ -118,11 +122,12 @@
         bottom: 16px;
         left: 50%;
         transform: translateX(-50%);
-        z-index: 20;
+        z-index: 30;
         background: rgba(20, 20, 20, 0.75);
         color: #fff;
         padding: 8px 14px;
         border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.15);
         display: flex;
         gap: 8px;
         align-items: center;
@@ -137,7 +142,7 @@
         bottom: 74px;
         left: 50%;
         transform: translateX(-50%);
-        z-index: 20;
+        z-index: 30;
         background: rgba(255, 255, 255, 0.92);
         color: #111;
         padding: 8px 14px;
@@ -170,8 +175,13 @@
     </svg>
 
     <div id="searchBar">
-      <input id="searchInput" type="text" placeholder="Search city..." />
+      <input
+        id="searchInput"
+        type="text"
+        placeholder="Search city or sign..."
+      />
       <button id="searchBtn">Go</button>
+      <button id="exitBtn">Exit</button>
     </div>
 
     <div id="zoomPanel">
@@ -209,6 +219,7 @@
 
     <script src="https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.js"></script>
     <script>
+      /* Base map setup */
       const map = new maplibregl.Map({
         container: "map",
         style: {
@@ -218,7 +229,6 @@
               type: "raster",
               tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
               tileSize: 256,
-              attribution: "© OpenStreetMap contributors",
             },
           },
           layers: [{ id: "osm-tiles", type: "raster", source: "osm" }],
@@ -226,19 +236,25 @@
         center: [-98.5, 39.8],
         zoom: 4,
       });
+      map.dragPan.enable();
+      map.scrollZoom.enable();
+      map.boxZoom.enable();
+      map.keyboard.enable();
 
+      /* DOM refs */
       const overlay = document.getElementById("overlay");
-      const ellipseLayer = document.getElementById("ellipseLayer");
       const circleEl = document.getElementById("radiusCircle");
       const milesLabelEl = document.getElementById("milesLabel");
-      const zoomSlider = document.getElementById("zoomSlider");
-      const zoomValue = document.getElementById("zoomValue");
       const radiusPanel = document.getElementById("radiusPanel");
       const radiusSlider = document.getElementById("radiusSlider");
       const radiusInput = document.getElementById("radiusValue");
+      const zoomSlider = document.getElementById("zoomSlider");
+      const zoomValue = document.getElementById("zoomValue");
       const searchInput = document.getElementById("searchInput");
       const searchBtn = document.getElementById("searchBtn");
+      const exitBtn = document.getElementById("exitBtn");
 
+      /* Data */
       const cityData = [
         { lng: -111.891, lat: 40.7608, label: "Salt Lake City" },
         { lng: -112.07, lat: 41.223, label: "Ogden" },
@@ -250,84 +266,61 @@
         { lng: -87.6298, lat: 41.8781, label: "Chicago" },
         { lng: -87.8834, lat: 42.0334, label: "Des Plaines" },
       ];
+      const signsData = [
+        { lng: -118.268, lat: 34.0407, label: "Sign LA-1" },
+        { lng: -118.32, lat: 34.072, label: "Sign LA-2" },
+        { lng: -122.2718, lat: 37.812, label: "Sign OAK-1" },
+        { lng: -122.24, lat: 37.795, label: "Sign OAK-2" },
+        { lng: -87.635, lat: 41.885, label: "Sign CHI-1" },
+        { lng: -87.62, lat: 41.87, label: "Sign CHI-2" },
+        { lng: -87.9005, lat: 42.04, label: "Sign DP-1" },
+        { lng: -87.875, lat: 42.02, label: "Sign DP-2" },
+        { lng: -111.9, lat: 40.77, label: "Sign SLC-1" },
+        { lng: -111.86, lat: 40.745, label: "Sign SLC-2" },
+        { lng: -112.015, lat: 41.23, label: "Sign OGD-1" },
+        { lng: -111.66, lat: 40.245, label: "Sign PRO-1" },
+        { lng: -74.01, lat: 40.72, label: "Sign NYC-1" },
+        { lng: -73.995, lat: 40.705, label: "Sign NYC-2" },
+        { lng: -95.365, lat: 29.765, label: "Sign HOU-1" },
+        { lng: -95.38, lat: 29.745, label: "Sign HOU-2" },
+      ];
 
-      let pinEls = [],
-        activeCity = null;
-
+      /* Create static pins */
+      let cityPins = [],
+        signPins = [],
+        activePoint = null;
       map.on("load", () => {
         cityData.forEach((c) => {
-          const pin = document.createElement("div");
-          pin.className = "pin";
-          const label = document.createElement("div");
-          label.className = "pin-label";
-          label.innerText = c.label;
-          pin.appendChild(label);
-          overlay.appendChild(pin);
-          pinEls.push({ ...c, el: pin });
-          pin.addEventListener("click", () => {
-            flyToCity(c);
-            setActiveCity(c);
+          const el = document.createElement("div");
+          el.className = "pin";
+          overlay.appendChild(el);
+          cityPins.push({ ...c, el });
+        });
+        signsData.forEach((s) => {
+          const el = document.createElement("div");
+          el.className = "sign";
+          overlay.appendChild(el);
+          signPins.push({ ...s, el });
+        });
+        map.once("render", () => {
+          updatePins();
+          map.on("move", updatePins);
+          map.on("zoom", () => {
+            updatePins();
+            syncZoomUI();
           });
-        });
-        updatePins();
-        map.on("move", () => {
-          updatePins();
-          updateEllipse();
-        });
-        map.on("zoom", () => {
-          updatePins();
-          updateEllipse();
-          syncZoomUI();
-        });
-        map.on("resize", () => {
-          updatePins();
-          updateEllipse();
+          map.on("resize", updatePins);
         });
       });
-
       function updatePins() {
-        const rect = map.getCanvasContainer().getBoundingClientRect();
-        pinEls.forEach((p) => {
+        [...cityPins, ...signPins].forEach((p) => {
           const pos = map.project([p.lng, p.lat]);
-          if (
-            pos.x < 0 ||
-            pos.y < 0 ||
-            pos.x > rect.width ||
-            pos.y > rect.height
-          ) {
-            p.el.style.display = "none";
-          } else {
-            p.el.style.display = "block";
-            p.el.style.left = pos.x + "px";
-            p.el.style.top = pos.y + "px";
-          }
+          p.el.style.left = pos.x + "px";
+          p.el.style.top = pos.y + "px";
         });
       }
 
-      function flyToCity(city) {
-        map.flyTo({ center: [city.lng, city.lat], zoom: 11, essential: true });
-      }
-
-      function setActiveCity(city) {
-        activeCity = city;
-        radiusPanel.style.display = "flex";
-        updateEllipse();
-      }
-
-      // nonlinear mapping for slider
-      function sliderToMiles(v) {
-        const val = parseInt(v, 10);
-        if (val <= 30) return +(val * 0.1).toFixed(1);
-        const t = (val - 30) / 70;
-        return +(3 + t * (50 - 3)).toFixed(1);
-      }
-      function milesToSlider(mi) {
-        if (mi <= 3) return Math.round(mi * 10);
-        const t = (mi - 3) / (50 - 3);
-        return Math.round(30 + t * 70);
-      }
-
-      // convert miles to pixels
+      /* Ellipse helpers */
       function haversine(a, b) {
         const R = 6371008.8,
           toRad = (d) => (d * Math.PI) / 180;
@@ -340,25 +333,33 @@
           Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
         return 2 * R * Math.asin(Math.sqrt(h));
       }
-      function milesToPixels(centerLngLat, miles) {
-        const meters = miles * 1609.344;
-        const canvas = map.getCanvas();
-        const y = canvas.height / 2,
-          x = canvas.width / 2;
-        const ll1 = map.unproject([x, y]),
-          ll2 = map.unproject([x + 1, y]);
+      function milesToPixels(center, miles) {
+        const meters = miles * 1609.344,
+          canvas = map.getCanvas();
+        const ll1 = map.unproject([canvas.width / 2, canvas.height / 2]);
+        const ll2 = map.unproject([canvas.width / 2 + 1, canvas.height / 2]);
         const mPerPx = haversine(
           { lat: ll1.lat, lng: ll1.lng },
           { lat: ll2.lat, lng: ll2.lng }
         );
         return meters / mPerPx;
       }
-
+      function sliderToMiles(v) {
+        const val = parseInt(v, 10);
+        if (val <= 30) return +(val * 0.1).toFixed(1);
+        const t = (val - 30) / 70;
+        return +(3 + t * (50 - 3)).toFixed(1);
+      }
+      function milesToSlider(mi) {
+        if (mi <= 3) return Math.round(mi * 10);
+        const t = (mi - 3) / (50 - 3);
+        return Math.round(30 + t * 70);
+      }
       function updateEllipse() {
-        if (!activeCity) return;
-        const pos = map.project([activeCity.lng, activeCity.lat]);
-        const miles = parseFloat(radiusInput.value) || 0;
-        const pxRadius = milesToPixels(activeCity, miles);
+        if (!activePoint) return;
+        const pos = map.project([activePoint.lng, activePoint.lat]);
+        const miles = parseFloat(radiusInput.value) || 0.1;
+        const pxRadius = milesToPixels(activePoint, miles);
         circleEl.setAttribute("cx", pos.x);
         circleEl.setAttribute("cy", pos.y);
         circleEl.setAttribute("r", pxRadius);
@@ -367,13 +368,26 @@
         milesLabelEl.setAttribute("y", pos.y - pxRadius - 10);
       }
 
+      /* Search */
+      function flyTo(lat, lng) {
+        map.flyTo({ center: [lng, lat], zoom: 11, essential: true });
+      }
+      function setActive(lat, lng, label) {
+        activePoint = { lat, lng, label };
+        radiusPanel.style.display = "flex";
+        updateEllipse();
+      }
       function handleSearch() {
         const q = searchInput.value.trim().toLowerCase();
         if (!q) return;
-        const match = cityData.find((c) => c.label.toLowerCase().includes(q));
+        let match = cityData.find((c) => c.label.toLowerCase().includes(q));
+        if (!match) {
+          const s = signsData.find((x) => x.label.toLowerCase().includes(q));
+          if (s) match = s;
+        }
         if (match) {
-          flyToCity(match);
-          setActiveCity(match);
+          flyTo(match.lat, match.lng);
+          setActive(match.lat, match.lng, match.label);
         } else alert("No match found.");
       }
       searchBtn.addEventListener("click", handleSearch);
@@ -381,6 +395,15 @@
         if (e.key === "Enter") handleSearch();
       });
 
+      /* Exit button clears ellipse */
+      exitBtn.addEventListener("click", () => {
+        activePoint = null;
+        radiusPanel.style.display = "none";
+        circleEl.setAttribute("r", 0);
+        milesLabelEl.textContent = "";
+      });
+
+      /* Zoom */
       function syncZoomUI() {
         const z = map.getZoom();
         zoomSlider.value = z.toFixed(1);
@@ -393,13 +416,12 @@
       });
       map.on("zoom", syncZoomUI);
 
-      // Slider → updates input + ellipse
+      /* Radius controls */
       radiusSlider.addEventListener("input", () => {
         const miles = sliderToMiles(radiusSlider.value);
         radiusInput.value = miles.toFixed(1);
         updateEllipse();
       });
-      // Input → updates slider + ellipse
       radiusInput.addEventListener("change", () => {
         let miles = parseFloat(radiusInput.value);
         if (isNaN(miles) || miles < 0.1) miles = 0.1;
