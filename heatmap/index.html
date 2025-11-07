@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"
     />
-    <title>MapLibre – Heatmap (Fixed Drag + Zoom)</title>
+    <title>Heatmap Prototype – Search + Intensity + Legend</title>
 
     <link
       href="https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.css"
@@ -31,7 +31,7 @@
         inset: 0;
       }
 
-      /* Ellipse SVG overlay */
+      /* Ellipse overlay */
       #ellipseLayer {
         position: absolute;
         inset: 0;
@@ -53,13 +53,10 @@
         paint-order: stroke;
         stroke: #fff;
         stroke-width: 3px;
-        stroke-linejoin: round;
       }
 
-      /* Drag hit area (transparent but clickable only when active) */
       #dragHit {
         fill: rgba(0, 0, 0, 0.001);
-        stroke: none;
         pointer-events: none;
         cursor: grab;
       }
@@ -70,7 +67,6 @@
         cursor: grabbing;
       }
 
-      /* Handle */
       #interaction {
         position: absolute;
         inset: 0;
@@ -88,9 +84,6 @@
         pointer-events: auto;
         touch-action: none;
       }
-      #dragHandle.dragging {
-        cursor: grabbing;
-      }
 
       /* Top UI */
       #uiContainer {
@@ -103,7 +96,6 @@
         flex-direction: column;
         gap: 8px;
         padding: 8px;
-        box-sizing: border-box;
       }
       #searchBar,
       #zoomPanel {
@@ -161,7 +153,7 @@
         text-align: right;
       }
 
-      /* Bottom card */
+      /* Bottom overlay card */
       #bottomOverlay {
         position: absolute;
         bottom: 0;
@@ -203,9 +195,9 @@
         border: 1px solid rgba(0, 0, 0, 0.3);
         border-radius: 8px;
         padding: 4px 6px;
-        font-size: 15px;
         text-align: right;
       }
+
       #selectAreaBtn {
         margin-top: 8px;
         background: #0078ff;
@@ -219,15 +211,38 @@
         max-width: 320px;
         box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
         cursor: pointer;
-        transition: background 0.2s ease, opacity 0.2s ease;
       }
-      #selectAreaBtn:hover:not(:disabled) {
-        background: #005ed1;
+
+      /* Heatmap legend */
+      #legend {
+        position: absolute;
+        bottom: 110px;
+        right: 12px;
+        z-index: 45;
+        background: rgba(255, 255, 255, 0.9);
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 13px;
+        color: #333;
+        box-shadow: 0 1px 6px rgba(0, 0, 0, 0.2);
       }
-      #selectAreaBtn:disabled {
-        background: #a8c8ff;
-        opacity: 0.6;
-        cursor: not-allowed;
+      #legend .bar {
+        width: 140px;
+        height: 10px;
+        margin: 6px 0;
+        background: linear-gradient(
+          to right,
+          #00d0a8,
+          #0096ff,
+          #005aff,
+          #ff4646
+        );
+        border-radius: 6px;
+      }
+      #legend .labels {
+        display: flex;
+        justify-content: space-between;
+        font-size: 12px;
       }
     </style>
   </head>
@@ -240,9 +255,7 @@
       <circle id="dragHit" cx="-1000" cy="-1000" r="0"></circle>
     </svg>
 
-    <div id="interaction">
-      <div id="dragHandle" hidden aria-label="Drag selection center"></div>
-    </div>
+    <div id="interaction"><div id="dragHandle" hidden></div></div>
 
     <div id="uiContainer">
       <div id="searchBar">
@@ -290,6 +303,12 @@
       </div>
     </div>
 
+    <div id="legend">
+      <div>Heat intensity</div>
+      <div class="bar"></div>
+      <div class="labels"><span>Low</span><span>High</span></div>
+    </div>
+
     <script src="https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.js"></script>
     <script>
       const map = new maplibregl.Map({
@@ -309,21 +328,18 @@
         zoom: 4,
       });
 
-      const ellipseLayer = document.getElementById("ellipseLayer"),
-        circleEl = document.getElementById("radiusCircle"),
+      const circleEl = document.getElementById("radiusCircle"),
         milesLabelEl = document.getElementById("milesLabel"),
         dragHit = document.getElementById("dragHit"),
         dragHandle = document.getElementById("dragHandle"),
-        zoomSlider = document.getElementById("zoomSlider"),
-        zoomValue = document.getElementById("zoomValue"),
-        statusText = document.getElementById("statusText"),
         radiusControls = document.getElementById("radiusControls"),
         radiusSlider = document.getElementById("radiusSlider"),
         radiusInput = document.getElementById("radiusValue"),
         searchInput = document.getElementById("searchInput"),
         searchBtn = document.getElementById("searchBtn"),
         exitBtn = document.getElementById("exitBtn"),
-        selectAreaBtn = document.getElementById("selectAreaBtn");
+        selectAreaBtn = document.getElementById("selectAreaBtn"),
+        statusText = document.getElementById("statusText");
 
       const signsData = [
         { lng: -118.268, lat: 34.0407, impressions: 120000 },
@@ -344,7 +360,6 @@
       ];
 
       map.once("styledata", () => {
-        // ensures heatmap loads after style ready
         const geojson = {
           type: "FeatureCollection",
           features: signsData.map((s) => ({
@@ -364,7 +379,7 @@
               ["linear"],
               ["get", "impressions"],
               30000,
-              0.1,
+              0.2,
               200000,
               1.0,
             ],
@@ -373,11 +388,22 @@
               ["linear"],
               ["zoom"],
               5,
-              12,
+              20,
               11,
-              28,
-              14,
               40,
+              14,
+              60,
+            ],
+            "heatmap-intensity": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              5,
+              1.0,
+              11,
+              1.6,
+              14,
+              2.0,
             ],
             "heatmap-color": [
               "interpolate",
@@ -385,23 +411,25 @@
               ["heatmap-density"],
               0,
               "rgba(0,0,0,0)",
-              0.2,
+              0.1,
               "rgba(0,208,168,0.4)",
-              0.4,
-              "rgba(0,150,255,0.55)",
-              0.7,
-              "rgba(0,90,255,0.7)",
+              0.3,
+              "rgba(0,150,255,0.65)",
+              0.6,
+              "rgba(0,90,255,0.75)",
+              0.85,
+              "rgba(255,70,70,0.9)",
               1.0,
-              "rgba(255,70,70,0.85)",
+              "rgba(255,20,20,0.95)",
             ],
-            "heatmap-opacity": 0.85,
+            "heatmap-opacity": 0.95,
           },
         });
       });
 
       let activePoint = null;
       function flyTo(lat, lng) {
-        map.flyTo({ center: [lng, lat], zoom: 11, essential: true });
+        map.flyTo({ center: [lng, lat], zoom: 11 });
       }
       function setActive(lat, lng) {
         activePoint = { lat, lng };
@@ -409,6 +437,11 @@
         updateEllipse();
         updateCounts();
       }
+
+      searchBtn.onclick = () => handleSearch();
+      searchInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") handleSearch();
+      });
 
       function handleSearch() {
         const q = searchInput.value.trim().toLowerCase();
@@ -419,22 +452,15 @@
           "des plaines": { lat: 42.0334, lng: -87.8834 },
           "salt lake city": { lat: 40.7608, lng: -111.891 },
         };
-        let c = cityCenters[q];
-        if (!c) {
-          const s = signsData.find(
-            (x) => q.includes("sign") && q === x.label.toLowerCase()
+        const center = cityCenters[q];
+        if (center) {
+          flyTo(center.lat, center.lng);
+          setActive(center.lat, center.lng);
+        } else
+          alert(
+            "Try searching: Los Angeles, Oakland, Chicago, Des Plaines, Salt Lake City."
           );
-          if (s) c = { lat: s.lat, lng: s.lng };
-        }
-        if (c) {
-          flyTo(c.lat, c.lng);
-          setActive(c.lat, c.lng);
-        } else alert("No match found.");
       }
-      searchBtn.onclick = handleSearch;
-      searchInput.onkeydown = (e) => {
-        if (e.key === "Enter") handleSearch();
-      };
 
       exitBtn.onclick = () => {
         activePoint = null;
@@ -442,17 +468,9 @@
         milesLabelEl.textContent = "";
         radiusControls.style.display = "none";
         dragHandle.hidden = true;
-        selectAreaBtn.disabled = true;
-        statusText.textContent = "Search locations to see results";
         dragHit.classList.remove("active");
+        statusText.textContent = "Search locations to see results";
       };
-
-      function syncZoomUI() {
-        zoomSlider.value = map.getZoom().toFixed(1);
-        zoomValue.textContent = map.getZoom().toFixed(1);
-      }
-      zoomSlider.oninput = (e) => map.setZoom(parseFloat(e.target.value));
-      map.on("zoom", syncZoomUI);
 
       function toRad(d) {
         return (d * Math.PI) / 180;
@@ -484,24 +502,13 @@
           )
         );
       }
-      function sliderToMiles(v) {
-        const val = parseInt(v, 10);
-        if (val <= 30) return +(val * 0.1).toFixed(1);
-        const t = (val - 30) / 70;
-        return +(3 + t * (50 - 3)).toFixed(1);
-      }
-      function milesToSlider(mi) {
-        if (mi <= 3) return Math.round(mi * 10);
-        const t = (mi - 3) / (50 - 3);
-        return Math.round(30 + t * 70);
-      }
+
       function handleSizeForPx(px) {
         const min = 16,
           max = 36;
         const t = Math.max(0, Math.min(1, (px - 40) / (300 - 40)));
         return Math.round(min + t * (max - min));
       }
-
       function positionHandle() {
         if (!activePoint) {
           dragHandle.hidden = true;
@@ -535,12 +542,11 @@
         updateSelectButtonState();
       }
 
+      let isDraggingHit = false;
       function screenToLngLat(x, y) {
         const r = map.getCanvasContainer().getBoundingClientRect();
         return map.unproject([x - r.left, y - r.top]);
       }
-
-      let isDraggingHit = false;
       dragHit.onpointerdown = (e) => {
         if (!activePoint) return;
         isDraggingHit = true;
@@ -552,7 +558,7 @@
         e.preventDefault();
       };
       function moveHit(e) {
-        if (!isDraggingHit || !activePoint) return;
+        if (!isDraggingHit) return;
         const ll = screenToLngLat(e.clientX, e.clientY);
         activePoint.lng = ll.lng;
         activePoint.lat = ll.lat;
@@ -586,54 +592,29 @@
         const { count } = activePoint ? countSignsInSelection() : { count: 0 };
         selectAreaBtn.disabled = count === 0;
       }
-      function updateSignCountInView() {
-        const b = map.getBounds();
-        let c = 0,
-          i = 0;
-        for (const s of signsData) {
-          if (b.contains([s.lng, s.lat])) {
-            c++;
-            i += s.impressions;
-          }
-        }
-        statusText.textContent = `${c} sign${
-          c !== 1 ? "s" : ""
-        } in view · ${i.toLocaleString()} impressions`;
-      }
       function updateSelectionStatus() {
         const { count, impressions } = countSignsInSelection();
-        statusText.textContent = `${count} sign${
-          count !== 1 ? "s" : ""
-        } in selection · ${impressions.toLocaleString()} impressions`;
+        statusText.textContent = `${impressions.toLocaleString()} impressions in selection`;
+        //   statusText.textContent = `${count} sign${
+        //   count !== 1 ? "s" : ""
+        // } in selection · ${impressions.toLocaleString()} impressions`;
       }
       function updateCounts() {
         if (activePoint) updateSelectionStatus();
-        else updateSignCountInView();
       }
-
       radiusSlider.oninput = () => {
-        const m = sliderToMiles(radiusSlider.value);
-        radiusInput.value = m.toFixed(1);
+        radiusInput.value = (radiusSlider.value / 2).toFixed(1);
         updateEllipse();
         updateCounts();
       };
       radiusInput.onchange = () => {
-        let m = parseFloat(radiusInput.value);
-        if (isNaN(m) || m < 0.1) m = 0.1;
-        if (m > 50) m = 50;
-        radiusInput.value = m.toFixed(1);
-        radiusSlider.value = milesToSlider(m);
         updateEllipse();
         updateCounts();
       };
-
       selectAreaBtn.onclick = () => {
-        if (!activePoint) return;
         const { count, impressions } = countSignsInSelection();
         alert(
-          `You selected ${count} sign${
-            count !== 1 ? "s" : ""
-          } · ${impressions.toLocaleString()} impressions in this area!`
+          `Selected ${count} signs (${impressions.toLocaleString()} impressions)`
         );
       };
     </script>
