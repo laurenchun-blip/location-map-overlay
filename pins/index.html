@@ -182,6 +182,10 @@
         box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
         cursor: pointer;
       }
+      .current-location-text {
+        color: #0078ff;
+        font-weight: 400;
+      }
     </style>
   </head>
 
@@ -197,7 +201,12 @@
 
     <div id="uiContainer">
       <div id="searchBar">
-        <input id="searchInput" type="text" placeholder="Search city..." />
+        <input
+          id="searchInput"
+          type="text"
+          placeholder="Search city or use current location"
+        />
+
         <button id="searchBtn">Go</button>
         <button id="closeBtn" style="display: none">×</button>
       </div>
@@ -243,11 +252,38 @@
           },
           layers: [{ id: "osm", type: "raster", source: "osm" }],
         },
-        center: [-98.5, 39.8],
+        center: [-98.5, 39.8], // fallback center
         zoom: 4,
       });
 
       map.touchZoomRotate.enable();
+
+      // Try to center map on user's current location (no fly or zoom)
+      if ("geolocation" in navigator) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const { latitude, longitude } = pos.coords;
+            // Instantly recenter the map without zoom animation
+            map.setCenter([longitude, latitude]);
+            map.setZoom(11);
+            // Update UI
+            searchInput.value = "Current location";
+            searchInput.classList.add("current-location-text"); // ✅ blue text
+
+            closeBtn.style.display = "inline";
+            statusText.textContent = "Showing your current location";
+          },
+          (err) => {
+            console.warn("Geolocation failed:", err.message);
+            statusText.textContent =
+              "Could not get your location — search a city or drop a pin";
+          },
+          { enableHighAccuracy: true, timeout: 5000 }
+        );
+      } else {
+        statusText.textContent =
+          "Location not supported — search a city or drop a pin";
+      }
 
       const overlay = document.getElementById("overlay");
       const radiusCircle = document.getElementById("radiusCircle");
@@ -369,7 +405,6 @@
         )}`;
       }
 
-      /* ---------- Search ---------- */
       const cityCenters = {
         "los angeles": { lat: 34.0522, lng: -118.2437 },
         oakland: { lat: 37.8044, lng: -122.2712 },
@@ -392,7 +427,6 @@
         if (e.key === "Enter") handleSearch();
       });
 
-      /* ---------- Drop Pin ---------- */
       dropPinBtn.addEventListener("click", () => {
         const c = map.getCenter();
         dropPinAt(c.lat, c.lng);
@@ -417,9 +451,9 @@
         radiusControls.style.display = "none";
         statusText.textContent = "Search a city or drop a pin";
         pinEls.forEach((s) => s.el.classList.remove("in-selection"));
+        searchInput.classList.remove("current-location-text");
       });
 
-      /* ---------- Dragging ---------- */
       dragHit.addEventListener("pointerdown", (e) => {
         if (!activePoint) return;
         isDragging = true;
@@ -448,7 +482,6 @@
         window.removeEventListener("pointermove", onMove);
       }
 
-      /* ---------- Controls ---------- */
       radiusSlider.oninput = () => {
         radiusValue.value = radiusSlider.value;
         updateCircle();
